@@ -119,15 +119,6 @@ _CSV_TEMPLATES = {
         ],
         "notes": "road_class: Federal, State, LGA (optional); lga can be blank for roads",
     },
-    # Weekly versions use identical templates
-    "fw_flood_extent": None,  # resolved dynamically to fc_flood_extent template
-    "fw_population":   None,
-    "fw_communities":  None,
-    "fw_health":       None,
-    "fw_schools":      None,
-    "fw_farmland":     None,
-    "fw_roads":        None,
-}
     "sw_station_updates": {
         "columns": "station_name,river,state,lga,lat,lon,level_m,flow_m3s,status,notes",
         "description": "Station condition updates — new readings, field observations, or situation reports.",
@@ -142,6 +133,16 @@ _CSV_TEMPLATES = {
             "notes = free text field observation (max 200 chars). All columns except lat/lon are optional."
         ),
     },
+    # Weekly versions use identical templates
+    "fw_flood_extent": None,  # resolved dynamically to fc_flood_extent template
+    "fw_population":   None,
+    "fw_communities":  None,
+    "fw_health":       None,
+    "fw_schools":      None,
+    "fw_farmland":     None,
+    "fw_roads":        None,
+}
+
 # Weekly layers share templates with their annual counterparts
 for _wk in ["fw_flood_extent","fw_population","fw_communities","fw_health","fw_schools","fw_farmland","fw_roads"]:
     _CSV_TEMPLATES[_wk] = _CSV_TEMPLATES[_wk.replace("fw_","fc_")]
