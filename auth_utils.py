@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 
-SECRET_KEY = os.getenv("SECRET_KEY", "nihsa-super-secret-key-change-in-production-2026")
+SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM  = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("TOKEN_EXPIRE_HOURS", "24"))
 

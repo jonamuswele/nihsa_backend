@@ -16,9 +16,12 @@ from database import get_db
 from auth_utils import require_role
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-_NFFS_ROOT   = Path(os.getenv("NFFS_ROOT", r"C:\Users\DELL\Documents\nffs"))
+_NFFS_ROOT   = Path(os.getenv("NFFS_ROOT", "/app/nffs_data"))
 _GEOJSON_DIR = _NFFS_ROOT / "results" / "atlas" / "geojson"
 _ATLAS_DIR   = _NFFS_ROOT / "results" / "atlas"
+
+_GEOJSON_DIR.mkdir(parents=True, exist_ok=True)
+_ATLAS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Maps layer_key → canonical GeoJSON filename on disk
 _KEY_TO_FILE = {

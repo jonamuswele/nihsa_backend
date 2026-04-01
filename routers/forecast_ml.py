@@ -32,13 +32,16 @@ logger = logging.getLogger("nihsa.forecast_ml")
 router = APIRouter()
 
 # ── NFFS output directory ──────────────────────────────────────────────────────
-NFFS_ROOT       = Path(os.getenv("NFFS_ROOT", r"C:\Users\DELL\Documents\nffs"))
+NFFS_ROOT       = Path(os.getenv("NFFS_ROOT", "/app/nffs_data"))
 DIR_ALERTS      = NFFS_ROOT / "data" / "processed" / "alerts"
 DIR_PREDICTIONS = NFFS_ROOT / "data" / "processed" / "predictions"
 DIR_HBV         = NFFS_ROOT / "data" / "processed" / "hbv"
 DIR_IMPACT      = NFFS_ROOT / "data" / "processed" / "impact"
 DIR_CONFIG      = NFFS_ROOT / "config"
 DIR_BULLETINS   = NFFS_ROOT / "results" / "bulletins"
+
+for dir_path in [DIR_ALERTS, DIR_PREDICTIONS, DIR_IMPACT, DIR_CONFIG, DIR_BULLETINS]:
+    dir_path.mkdir(parents=True, exist_ok=True)
 
 # ── Nigerian state lookup by nearest capital centroid ─────────────────────────
 # (lat, lon, state_name) — used when NFFS data has no state field

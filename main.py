@@ -1,6 +1,5 @@
 """
 NIHSA National Flood Intelligence Platform — Backend API
-Nigeria Hydrological Services Agency
 """
 
 import sys
@@ -15,6 +14,7 @@ from contextlib import asynccontextmanager
 import json
 import asyncio
 from typing import Dict, List
+from pathlib import Path
 
 from database import engine, Base, SessionLocal
 from routers import auth, alerts, gauges, reports, forecast, chat, dashboard, vanguards, admin, forecast_ml, assistant, seasonal, map_layers
@@ -56,7 +56,6 @@ async def lifespan(app: FastAPI):
     with engine.connect() as conn:
         migrations = [
             "ALTER TABLE users ADD COLUMN sub_admin_scope VARCHAR(60)",
-            # Fix sw_satellite layer type: was seeded as 'toggle', must be 'geojson_fc' to allow CSV upload
             "UPDATE map_layers SET layer_type='geojson_fc' WHERE layer_key='sw_satellite' AND layer_type='toggle'",
         ]
         for sql in migrations:
@@ -84,10 +83,10 @@ async def lifespan(app: FastAPI):
                     password_hash=hash_password(u["password"]),
                     role=u["role"], is_active=True,
                 ))
-                print("Seeded user: " + u["email"])
+                print(f"Seeded user: {u['email']}")
         db.commit()
     except Exception as e:
-        print("Seed error: " + str(e))
+        print(f"Seed error: {str(e)}")
         db.rollback()
     finally:
         db.close()
@@ -102,14 +101,14 @@ async def lifespan(app: FastAPI):
                 db2.add(m.MapLayer(**d))
         db2.commit()
     except Exception as e:
-        print("Map layer seed error: " + str(e))
+        print(f"Map layer seed error: {str(e)}")
         db2.rollback()
     finally:
         db2.close()
 
     print("NIHSA API started — database ready")
+    
     # Alert auto-delete runs every 6 hours
-    import asyncio
     async def _auto_delete():
         while True:
             await asyncio.sleep(21600)
@@ -118,10 +117,17 @@ async def lifespan(app: FastAPI):
                 from database import SessionLocal
                 db = SessionLocal()
                 cutoff = datetime.utcnow() - timedelta(days=30)
-                n = db.query(m.FloodAlert).filter(m.FloodAlert.created_at < cutoff, m.FloodAlert.is_active == False).delete(synchronize_session=False)
-                db.commit(); db.close()
-                if n: print(f"Auto-purged {n} expired alerts")
-            except: pass
+                n = db.query(m.FloodAlert).filter(
+                    m.FloodAlert.created_at < cutoff, 
+                    m.FloodAlert.is_active == False
+                ).delete(synchronize_session=False)
+                db.commit()
+                db.close()
+                if n:
+                    print(f"Auto-purged {n} expired alerts")
+            except:
+                pass
+    
     asyncio.create_task(_auto_delete())
     yield
     print("NIHSA API shutting down")
@@ -135,63 +141,42 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Serve uploaded media files
-_MEDIA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media")
-os.makedirs(_MEDIA_DIR, exist_ok=True)
-app.mount("/media", StaticFiles(directory=_MEDIA_DIR), name="media")
-
-# ── NFFS Atlas & Export static files ──────────────────────────────────────────
-# Serves the full atlas HTML, maps, animation, and CSV downloads at /nffs/...
-import pathlib as _pl
-_NFFS_ROOT  = _pl.Path(os.getenv("NFFS_ROOT", r"C:\Users\DELL\Documents\nffs"))
-_ATLAS_DIR  = _NFFS_ROOT / "results" / "atlas"
-_EXPORT_DIR = _ATLAS_DIR / "atrisk_exports"
-if _ATLAS_DIR.exists():
-    app.mount("/nffs/atlas",   StaticFiles(directory=str(_ATLAS_DIR)),   name="nffs_atlas")
-if _EXPORT_DIR.exists():
-    app.mount("/nffs/exports", StaticFiles(directory=str(_EXPORT_DIR)),  name="nffs_exports")
+# Configure CORS for production
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",") + [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://nihsa-frontend.onrender.com",
+    "https://*.onrender.com",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "capacitor://localhost",        # Capacitor Android/iOS WebView
-        "http://localhost",
-        "http://localhost:8080",
-        "https://localhost",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-from fastapi import Request
-from fastapi.responses import Response, JSONResponse
-from sqlalchemy.exc import SQLAlchemyError
+# Serve uploaded media files
+MEDIA_DIR = os.getenv("MEDIA_DIR", "/app/media")
+os.makedirs(MEDIA_DIR, exist_ok=True)
+app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
 
-@app.exception_handler(SQLAlchemyError)
-async def sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
-    return JSONResponse(status_code=503, content={"detail": "Database error. Please try again."})
+# NFFS Atlas & Export static files
+NFFS_ROOT = Path(os.getenv("NFFS_ROOT", "/app/nffs_data"))
+ATLAS_DIR = NFFS_ROOT / "results" / "atlas"
+EXPORT_DIR = ATLAS_DIR / "atrisk_exports"
 
-@app.exception_handler(Exception)
-async def unhandled_error_handler(request: Request, exc: Exception):
-    import traceback
-    print(f"Unhandled error on {request.method} {request.url.path}: {traceback.format_exc()}")
-    return JSONResponse(status_code=500, content={"detail": "An unexpected error occurred."})
+# Create directories if they don't exist
+ATLAS_DIR.mkdir(parents=True, exist_ok=True)
+EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
-@app.middleware("http")
-async def security_headers(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    # Allow atlas HTML pages (served from /nffs/atlas/) to be embedded as iframes
-    if not request.url.path.startswith("/nffs/"):
-        response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(self)"
-    return response
+if ATLAS_DIR.exists():
+    app.mount("/nffs/atlas", StaticFiles(directory=str(ATLAS_DIR)), name="nffs_atlas")
+if EXPORT_DIR.exists():
+    app.mount("/nffs/exports", StaticFiles(directory=str(EXPORT_DIR)), name="nffs_exports")
 
+# Import routers
 app.include_router(auth.router,      prefix="/api/auth",      tags=["Auth"])
 app.include_router(alerts.router,    prefix="/api/alerts",    tags=["Alerts"])
 app.include_router(gauges.router,    prefix="/api/gauges",    tags=["Gauges"])
@@ -213,7 +198,7 @@ async def root():
 
 @app.get("/api/health")
 async def health():
-    return {"status": "healthy"}
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 
 @app.websocket("/ws/chat/{channel_id}")
