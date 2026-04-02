@@ -144,16 +144,18 @@ app = FastAPI(
 )
 
 # Configure CORS for production
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",") + [
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",") if os.getenv("ALLOWED_ORIGINS") else []
+
+# Always include these exact origins
+ALLOWED_ORIGINS.extend([
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "https://nihsa-frontend.onrender.com",
-    "https://*.onrender.com",
-]
+])
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=ALLOWED_ORIGINS,  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
