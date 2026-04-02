@@ -16,7 +16,8 @@ import asyncio
 from typing import Dict, List
 from pathlib import Path
 from sqlalchemy.orm import Session
-from database import engine, Base, SessionLocal, get_db
+from database import engine, Base, SessionLocal
+from database import get_db
 from routers import auth, alerts, gauges, reports, forecast, chat, dashboard, vanguards, admin, forecast_ml, assistant, seasonal, map_layers
 import models
 from auth_utils import verify_password
