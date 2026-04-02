@@ -191,6 +191,31 @@ app.include_router(seasonal.router,    prefix="/api/seasonal",     tags=["Season
 app.include_router(assistant.router,   prefix="/api/assistant",    tags=["Assistant"])
 app.include_router(map_layers.router,  prefix="/api/map-layers",   tags=["Map Layers"])
 
+@app.get("/api/debug/admin-check")
+async def check_admin(db: Session = Depends(get_db)):
+    from auth_utils import verify_password
+    
+    admin = db.query(models.User).filter(
+        models.User.email == "admin@nihsa.gov.ng"
+    ).first()
+    
+    if not admin:
+        return {"exists": False, "message": "Admin user not found in database"}
+    
+    # Test if password works
+    password_works = verify_password("nihsa2026", admin.password_hash)
+    
+    return {
+        "exists": True,
+        "email": admin.email,
+        "role": admin.role.value,
+        "is_active": admin.is_active,
+        "is_verified": admin.is_verified,
+        "password_hash_starts": admin.password_hash[:20] + "...",
+        "password_verification": "SUCCESS" if password_works else "FAILED",
+        "id": admin.id
+    }
+    
 @app.get("/api/db-test")
 async def test_database():
     from database import SessionLocal
