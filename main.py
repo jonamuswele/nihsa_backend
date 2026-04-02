@@ -191,6 +191,70 @@ app.include_router(seasonal.router,    prefix="/api/seasonal",     tags=["Season
 app.include_router(assistant.router,   prefix="/api/assistant",    tags=["Assistant"])
 app.include_router(map_layers.router,  prefix="/api/map-layers",   tags=["Map Layers"])
 
+@app.get("/api/db-test")
+async def test_database():
+    from database import SessionLocal
+    from sqlalchemy import text
+    
+    try:
+        db = SessionLocal()
+        # Try to query the database
+        result = db.execute(text("SELECT 1 as test"))
+        db.close()
+        return {
+            "status": "connected", 
+            "message": "Database connection successful!",
+            "database_url": os.getenv("DATABASE_URL", "").replace("://", "://***@")[:50] + "..."
+        }
+    except Exception as e:
+        return {
+            "status": "failed", 
+            "error": str(e),
+            "message": "Database connection failed - check DATABASE_URL"
+        }
+
+@app.get("/api/tables-check")
+async def check_tables():
+    from database import SessionLocal
+    from sqlalchemy import text
+    
+    try:
+        db = SessionLocal()
+        # Get list of all tables
+        result = db.execute(text("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+            ORDER BY table_name
+        """))
+        tables = [row[0] for row in result.fetchall()]
+        db.close()
+        
+        return {
+            "status": "success",
+            "table_count": len(tables),
+            "tables": tables[:20],  # Show first 20 tables
+            "expected_tables": ["users", "river_gauges", "flood_alerts", "flood_reports"]
+        }
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+
+@app.get("/api/users-count")
+async def count_users():
+    from database import SessionLocal
+    import models
+    
+    try:
+        db = SessionLocal()
+        count = db.query(models.User).count()
+        db.close()
+        return {
+            "status": "success",
+            "user_count": count,
+            "message": f"Database has {count} users"
+        }
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
 
 @app.get("/")
 async def root():
