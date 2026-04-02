@@ -14,21 +14,60 @@ router = APIRouter()
 
 @router.post("/login", response_model=schemas.TokenResponse)
 @router.post("/token", response_model=schemas.TokenResponse)
-def login(
-    username: str = Form(...),
-    password: str = Form(...),
+async def login(
+    request: Request,
     db: Session = Depends(get_db),
+    # Form data fallback
+    username_form: Optional[str] = Form(None),
+    password_form: Optional[str] = Form(None),
 ):
+    username = None
+    password = None
+    
+    # Try to get from JSON body first
+    content_type = request.headers.get("content-type", "")
+    
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            username = body.get("username") or body.get("email")
+            password = body.get("password")
+            print(f"JSON login attempt - username: {username}")  # Debug
+        except Exception as e:
+            print(f"JSON parse error: {e}")
+    
+    # Fall back to form data
+    if not username:
+        username = username_form
+        password = password_form
+        print(f"Form login attempt - username: {username}")  # Debug
+    
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Username and password required")
+    
+    # Query user
     user = db.query(models.User).filter(
         (models.User.email == username) | (models.User.phone_number == username)
     ).first()
+    
+    print(f"User found: {user is not None}")  # Debug
+    print(f"Password verification: {verify_password(password, user.password_hash) if user else 'N/A'}")  # Debug
+    
     if not user or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
+    
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account suspended")
+    
     user.last_login = datetime.utcnow()
     db.commit()
-    token = create_access_token({"sub": str(user.id), "role": user.role.value, "scope": user.sub_admin_scope})
+    
+    token = create_access_token({
+        "sub": str(user.id), 
+        "role": user.role.value, 
+        "scope": user.sub_admin_scope
+    })
+    
     return schemas.TokenResponse(access_token=token, user=user)
 
 
