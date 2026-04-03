@@ -23,6 +23,8 @@ import models
 from auth_utils import verify_password
 from auth_utils import hash_password
 import models as m
+from sqlalchemy import text
+from routers.map_layers import _DEFAULT_LAYERS
 
 class ConnectionManager:
     def __init__(self):
@@ -54,9 +56,7 @@ manager = ConnectionManager()
 async def lifespan(app: FastAPI):
     # Create all tables
     Base.metadata.create_all(bind=engine)
-
-    # Apply incremental schema migrations (safe — ADD COLUMN IF NOT EXISTS)
-    from sqlalchemy import text
+    
     with engine.connect() as conn:
         migrations = [
             "ALTER TABLE users ADD COLUMN sub_admin_scope VARCHAR(60)",
@@ -67,62 +67,58 @@ async def lifespan(app: FastAPI):
                 conn.execute(text(sql))
                 conn.commit()
             except Exception:
-                pass  # Column already exists
+                pass  
 
-    # Seed default admin users if they don't exist
-    from auth_utils import hash_password
-    import models as m
-
+    
     db = SessionLocal()
-try:
-    
-    default_admin_email = os.getenv("DEFAULT_ADMIN_EMAIL", "")
-    default_admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "")
-    default_admin_name = os.getenv("DEFAULT_ADMIN_NAME", "System Administrator")
-    
-    if default_admin_email and default_admin_password:
-        exists = db.query(m.User).filter(m.User.email == default_admin_email).first()
-        if not exists:
-            db.add(m.User(
-                name=default_admin_name,
-                email=default_admin_email,
-                phone_number=os.getenv("DEFAULT_ADMIN_PHONE", "08000000000"),
-                password_hash=hash_password(default_admin_password),
-                role=m.UserRole.ADMIN,
-                is_active=True,
-                is_verified=True,  
-            ))
-            print(f"Created admin user: {default_admin_email}")
-    
-    # Optional: Create a default coordinator (also from env)
-    default_coordinator_email = os.getenv("DEFAULT_COORDINATOR_EMAIL", "")
-    default_coordinator_password = os.getenv("DEFAULT_COORDINATOR_PASSWORD", "")
-    
-    if default_coordinator_email and default_coordinator_password:
-        exists = db.query(m.User).filter(m.User.email == default_coordinator_email).first()
-        if not exists:
-            db.add(m.User(
-                name=os.getenv("DEFAULT_COORDINATOR_NAME", "NIHSA Coordinator"),
-                email=default_coordinator_email,
-                phone_number=os.getenv("DEFAULT_COORDINATOR_PHONE", "08000000001"),
-                password_hash=hash_password(default_coordinator_password),
-                role=m.UserRole.NIHSA_STAFF,
-                is_active=True,
-                is_verified=True,
-            ))
-            print(f"Created coordinator user: {default_coordinator_email}")
-            
-    db.commit()
-except Exception as e:
-    print(f"Seed error: {str(e)}")
-    db.rollback()
-finally:
-    db.close()
+    try:
+        default_admin_email = os.getenv("DEFAULT_ADMIN_EMAIL", "")
+        default_admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "")
+        default_admin_name = os.getenv("DEFAULT_ADMIN_NAME", "System Administrator")
+        
+        if default_admin_email and default_admin_password:
+            exists = db.query(m.User).filter(m.User.email == default_admin_email).first()
+            if not exists:
+                db.add(m.User(
+                    name=default_admin_name,
+                    email=default_admin_email,
+                    phone_number=os.getenv("DEFAULT_ADMIN_PHONE", "08000000000"),
+                    password_hash=hash_password(default_admin_password),
+                    role=m.UserRole.ADMIN,
+                    is_active=True,
+                    is_verified=True,  
+                ))
+                print(f"Created admin user: {default_admin_email}")
+        
+        # Optional: Create a default coordinator (also from env)
+        default_coordinator_email = os.getenv("DEFAULT_COORDINATOR_EMAIL", "")
+        default_coordinator_password = os.getenv("DEFAULT_COORDINATOR_PASSWORD", "")
+        
+        if default_coordinator_email and default_coordinator_password:
+            exists = db.query(m.User).filter(m.User.email == default_coordinator_email).first()
+            if not exists:
+                db.add(m.User(
+                    name=os.getenv("DEFAULT_COORDINATOR_NAME", "NIHSA Coordinator"),
+                    email=default_coordinator_email,
+                    phone_number=os.getenv("DEFAULT_COORDINATOR_PHONE", "08000000001"),
+                    password_hash=hash_password(default_coordinator_password),
+                    role=m.UserRole.NIHSA_STAFF,
+                    is_active=True,
+                    is_verified=True,
+                ))
+                print(f"Created coordinator user: {default_coordinator_email}")
+                
+        db.commit()
+    except Exception as e:
+        print(f"Seed error: {str(e)}")
+        db.rollback()
+    finally:
+        db.close()
 
     # Seed default map layers
     db2 = SessionLocal()
     try:
-        from routers.map_layers import _DEFAULT_LAYERS
+        
         for d in _DEFAULT_LAYERS:
             exists = db2.query(m.MapLayer).filter(m.MapLayer.layer_key == d["layer_key"]).first()
             if not exists:
@@ -159,7 +155,6 @@ finally:
     asyncio.create_task(_auto_delete())
     yield
     print("NIHSA API shutting down")
-
 
 app = FastAPI(
     title="NIHSA Flood Intelligence API",
