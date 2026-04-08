@@ -127,8 +127,6 @@ def verify_report(
         if report.media_urls and USE_R2 and r2_client:
             for media_url in report.media_urls:
                 try:
-                    # Extract file key from URL
-                    # URL format: https://bucket.r2.dev/reports/img_xxx.jpg
                     parsed = urlparse(media_url)
                     file_key = parsed.path.lstrip('/')
                     r2_client.delete_object(Bucket=R2_BUCKET_NAME, Key=file_key)
@@ -177,9 +175,9 @@ def verify_report(
 
 @router.delete("/{report_id}", status_code=204)
 def delete_report(
-        report_id: str,
-        db: Session = Depends(get_db),
-        current_user: models.User = Depends(require_government),
+    report_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_government),
 ):
     report = db.query(models.FloodReport).filter(models.FloodReport.id == report_id).first()
     if not report:
@@ -226,7 +224,8 @@ async def create_report_with_media(
 ):
     _ALLOWED_EXT = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'webm', 'mov', 'mp3', 'wav', 'ogg', 'm4a'}
 
-    def save_to_r2(file: UploadFile, prefix: str) -> Optional[str]:
+    async def save_to_r2(file: UploadFile, prefix: str) -> Optional[str]:
+        """Upload to Cloudflare R2 and return public URL (async)"""
         if not file or not file.filename or not r2_client:
             return None
 
@@ -244,7 +243,7 @@ async def create_report_with_media(
         }.get(ext, 'application/octet-stream')
 
         try:
-            content = await file.read()  # Use await for async
+            content = await file.read()
             r2_client.put_object(
                 Bucket=R2_BUCKET_NAME,
                 Key=file_key,
@@ -262,7 +261,8 @@ async def create_report_with_media(
             logging.getLogger("nihsa.reports").error(f"R2 upload failed: {e}")
             return None
 
-    def save_to_local(file: UploadFile, prefix: str) -> Optional[str]:
+    async def save_to_local(file: UploadFile, prefix: str) -> Optional[str]:
+        """Fallback to local storage (async)"""
         if not file or not file.filename:
             return None
         ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
@@ -307,7 +307,7 @@ async def create_report_with_media(
     }
 
 
-# Add to reports.py - Media deletion endpoint
+# Media deletion endpoint (optional, kept for compatibility)
 class MediaDeleteRequest(BaseModel):
     file_key: str
     report_id: str
@@ -315,22 +315,19 @@ class MediaDeleteRequest(BaseModel):
 
 @router.post("/media/delete")
 async def delete_media_file(
-        body: MediaDeleteRequest,
-        db: Session = Depends(get_db),
-        current_user: models.User = Depends(require_government),
+    body: MediaDeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_government),
 ):
     """Delete a media file from Cloudflare R2 (admin only)"""
     if not USE_R2 or not r2_client:
         return {"message": "R2 not configured, skipping file deletion"}
 
     try:
-        # Delete from R2
         r2_client.delete_object(Bucket=R2_BUCKET_NAME, Key=body.file_key)
 
-        # Also remove the URL from the report's media_urls array
         report = db.query(models.FloodReport).filter(models.FloodReport.id == body.report_id).first()
         if report and report.media_urls:
-            # Find the URL that matches this file_key
             url_to_remove = f"https://{R2_BUCKET_NAME}.r2.dev/{body.file_key}"
             if url_to_remove in report.media_urls:
                 report.media_urls = [u for u in report.media_urls if u != url_to_remove]
