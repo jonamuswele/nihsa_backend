@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
 
+from pydantic import BaseModel
+
 from database import get_db
 import models, schemas
 from auth_utils import get_current_user, get_current_user_optional, require_government
