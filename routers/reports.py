@@ -38,9 +38,9 @@ if USE_R2 and R2_ACCOUNT_ID and R2_ACCESS_KEY and R2_SECRET_KEY:
         config=Config(signature_version='s3v4'),
         region_name='auto'
     )
-    print("R2 client initialized")
+    print(f"✅ R2 client initialized for bucket: {R2_BUCKET_NAME}")
 else:
-    print("R2 not configured - using local storage")
+    print("⚠️ R2 not configured - using local storage")
 
 @router.get("", response_model=List[schemas.FloodReportOut])
 def list_reports(
@@ -180,6 +180,9 @@ import os as _os
 MEDIA_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "media")
 _os.makedirs(MEDIA_DIR, exist_ok=True)
 
+MEDIA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "media")
+os.makedirs(MEDIA_DIR, exist_ok=True)
+
 
 @router.post("/media", status_code=201)
 async def create_report_with_media(
@@ -199,7 +202,7 @@ async def create_report_with_media(
     _ALLOWED_EXT = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'webm', 'mov', 'mp3', 'wav', 'ogg', 'm4a'}
 
     def save_to_r2(file: UploadFile, prefix: str) -> Optional[str]:
-        """Upload file to Cloudflare R2 and return public URL"""
+        """Upload to Cloudflare R2 and return public URL"""
         if not file or not file.filename or not r2_client:
             return None
 
@@ -210,19 +213,16 @@ async def create_report_with_media(
         # Generate unique filename
         file_key = f"reports/{prefix}_{_uuid.uuid4().hex[:12]}.{ext}"
 
+        # Determine content type
+        content_type = {
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+            'gif': 'image/gif', 'webp': 'image/webp',
+            'mp4': 'video/mp4', 'webm': 'video/webm', 'mov': 'video/quicktime',
+            'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg': 'audio/ogg', 'm4a': 'audio/mp4'
+        }.get(ext, 'application/octet-stream')
+
         try:
-            # Get file content
             content = file.file.read()
-
-            # Determine content type
-            content_type = {
-                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
-                'gif': 'image/gif', 'webp': 'image/webp',
-                'mp4': 'video/mp4', 'webm': 'video/webm', 'mov': 'video/quicktime',
-                'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg': 'audio/ogg', 'm4a': 'audio/mp4'
-            }.get(ext, 'application/octet-stream')
-
-            # Upload to R2
             r2_client.put_object(
                 Bucket=R2_BUCKET_NAME,
                 Key=file_key,
@@ -234,10 +234,8 @@ async def create_report_with_media(
                     'report_type': prefix
                 }
             )
-
-            # Return public URL (using r2.dev domain)
+            # Return the public URL (using r2.dev or your custom domain)
             return f"https://{R2_BUCKET_NAME}.r2.dev/{file_key}"
-
         except Exception as e:
             import logging
             logging.getLogger("nihsa.reports").error(f"R2 upload failed: {e}")
