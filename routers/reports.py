@@ -14,8 +14,33 @@ from database import get_db
 import models, schemas
 from auth_utils import get_current_user, get_current_user_optional, require_government
 
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
+from urllib.parse import urlparse
+
 router = APIRouter()
 
+R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
+R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY_ID", "")
+R2_SECRET_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "")
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "nihsa-flood-reports")
+USE_R2 = os.getenv("USE_R2", "false").lower() == "true"
+
+
+r2_client = None
+if USE_R2 and R2_ACCOUNT_ID and R2_ACCESS_KEY and R2_SECRET_KEY:
+    r2_client = boto3.client(
+        's3',
+        endpoint_url=f'https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com',
+        aws_access_key_id=R2_ACCESS_KEY,
+        aws_secret_access_key=R2_SECRET_KEY,
+        config=Config(signature_version='s3v4'),
+        region_name='auto'
+    )
+    print("R2 client initialized")
+else:
+    print("R2 not configured - using local storage")
 
 @router.get("", response_model=List[schemas.FloodReportOut])
 def list_reports(
@@ -155,35 +180,90 @@ import os as _os
 MEDIA_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "media")
 _os.makedirs(MEDIA_DIR, exist_ok=True)
 
+
 @router.post("/media", status_code=201)
 async def create_report_with_media(
-    address: str = Form(""),
-    lat:  float = Form(9.082),
-    lng:  float = Form(8.675),
-    water_depth_m: float = Form(0.0),
-    description: str = Form("Unknown flood event"),
-    state: str = Form(""),
-    lga: str = Form(""),
-    image: UploadFile = File(None),
-    voice: UploadFile = File(None),
-    video: UploadFile = File(None),
-    db: Session = Depends(get_db),
-    current_user: Optional[models.User] = Depends(get_current_user_optional),
+        address: str = Form(""),
+        lat: float = Form(9.082),
+        lng: float = Form(8.675),
+        water_depth_m: float = Form(0.0),
+        description: str = Form("Unknown flood event"),
+        state: str = Form(""),
+        lga: str = Form(""),
+        image: UploadFile = File(None),
+        voice: UploadFile = File(None),
+        video: UploadFile = File(None),
+        db: Session = Depends(get_db),
+        current_user: Optional[models.User] = Depends(get_current_user_optional),
 ):
-    _ALLOWED_EXT = {'jpg','jpeg','png','gif','webp','mp4','webm','mov','mp3','wav','ogg','m4a'}
-    def save_file(f: UploadFile, prefix: str) -> str:
-        if not f or not f.filename:
+    _ALLOWED_EXT = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'webm', 'mov', 'mp3', 'wav', 'ogg', 'm4a'}
+
+    def save_to_r2(file: UploadFile, prefix: str) -> Optional[str]:
+        """Upload file to Cloudflare R2 and return public URL"""
+        if not file or not file.filename or not r2_client:
             return None
-        ext = f.filename.rsplit('.', 1)[-1].lower() if '.' in f.filename else ''
+
+        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+        if ext not in _ALLOWED_EXT:
+            return None
+
+        # Generate unique filename
+        file_key = f"reports/{prefix}_{_uuid.uuid4().hex[:12]}.{ext}"
+
+        try:
+            # Get file content
+            content = file.file.read()
+
+            # Determine content type
+            content_type = {
+                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+                'gif': 'image/gif', 'webp': 'image/webp',
+                'mp4': 'video/mp4', 'webm': 'video/webm', 'mov': 'video/quicktime',
+                'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg': 'audio/ogg', 'm4a': 'audio/mp4'
+            }.get(ext, 'application/octet-stream')
+
+            # Upload to R2
+            r2_client.put_object(
+                Bucket=R2_BUCKET_NAME,
+                Key=file_key,
+                Body=content,
+                ContentType=content_type,
+                Metadata={
+                    'original_filename': file.filename,
+                    'uploaded_by': current_user.id if current_user else 'anonymous',
+                    'report_type': prefix
+                }
+            )
+
+            # Return public URL (using r2.dev domain)
+            return f"https://{R2_BUCKET_NAME}.r2.dev/{file_key}"
+
+        except Exception as e:
+            import logging
+            logging.getLogger("nihsa.reports").error(f"R2 upload failed: {e}")
+            return None
+
+    def save_to_local(file: UploadFile, prefix: str) -> Optional[str]:
+        """Fallback to local storage"""
+        if not file or not file.filename:
+            return None
+        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
         if ext not in _ALLOWED_EXT:
             return None
         name = f"{prefix}_{_uuid.uuid4().hex[:8]}.{ext}"
-        path = _os.path.join(MEDIA_DIR, name)
+        path = os.path.join(MEDIA_DIR, name)
         with open(path, "wb") as out:
-            out.write(f.file.read())
+            out.write(file.file.read())
         return f"/media/{name}"
 
-    media_urls = [u for u in [save_file(image, "img"), save_file(voice, "voice"), save_file(video, "video")] if u]
+    # Choose storage method
+    save_func = save_to_r2 if USE_R2 and r2_client else save_to_local
+
+    media_urls = []
+    for f, prefix in [(image, "img"), (voice, "voice"), (video, "video")]:
+        url = save_func(f, prefix)
+        if url:
+            media_urls.append(url)
 
     report = models.FloodReport(
         lat=lat,
@@ -200,4 +280,9 @@ async def create_report_with_media(
     db.add(report)
     db.commit()
     db.refresh(report)
-    return {"id": report.id, "status": "pending", "message": "Report received. Pending NIHSA verification."}
+    return {
+        "id": report.id,
+        "status": "pending",
+        "media_urls": media_urls,
+        "message": "Report received. Pending NIHSA verification."
+    }
