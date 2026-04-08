@@ -284,3 +284,37 @@ async def create_report_with_media(
         "media_urls": media_urls,
         "message": "Report received. Pending NIHSA verification."
     }
+
+
+# Add to reports.py - Media deletion endpoint
+class MediaDeleteRequest(BaseModel):
+    file_key: str
+    report_id: str
+
+
+@router.post("/media/delete")
+async def delete_media_file(
+        body: MediaDeleteRequest,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(require_government),
+):
+    """Delete a media file from Cloudflare R2 (admin only)"""
+    if not USE_R2 or not r2_client:
+        return {"message": "R2 not configured, skipping file deletion"}
+
+    try:
+        # Delete from R2
+        r2_client.delete_object(Bucket=R2_BUCKET_NAME, Key=body.file_key)
+
+        # Also remove the URL from the report's media_urls array
+        report = db.query(models.FloodReport).filter(models.FloodReport.id == body.report_id).first()
+        if report and report.media_urls:
+            # Find the URL that matches this file_key
+            url_to_remove = f"https://{R2_BUCKET_NAME}.r2.dev/{body.file_key}"
+            if url_to_remove in report.media_urls:
+                report.media_urls = [u for u in report.media_urls if u != url_to_remove]
+                db.commit()
+
+        return {"message": f"Deleted {body.file_key}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete: {str(e)}")
