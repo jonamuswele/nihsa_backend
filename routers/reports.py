@@ -122,6 +122,20 @@ def verify_report(
     if body.risk_level:
         report.risk_level = body.risk_level
 
+    # If rejected, delete media files from R2
+    if body.status == models.VerificationStatus.REJECTED and prev_status != models.VerificationStatus.REJECTED:
+        if report.media_urls and USE_R2 and r2_client:
+            for media_url in report.media_urls:
+                try:
+                    # Extract file key from URL
+                    # URL format: https://bucket.r2.dev/reports/img_xxx.jpg
+                    parsed = urlparse(media_url)
+                    file_key = parsed.path.lstrip('/')
+                    r2_client.delete_object(Bucket=R2_BUCKET_NAME, Key=file_key)
+                    print(f"Deleted from R2: {file_key}")
+                except Exception as e:
+                    print(f"Failed to delete {media_url}: {e}")
+
     # ── Auto-create a public alert when a report is verified ──────────────────
     if (body.status == models.VerificationStatus.VERIFIED
             and prev_status != models.VerificationStatus.VERIFIED):
@@ -163,13 +177,25 @@ def verify_report(
 
 @router.delete("/{report_id}", status_code=204)
 def delete_report(
-    report_id: str,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_government),
+        report_id: str,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(require_government),
 ):
     report = db.query(models.FloodReport).filter(models.FloodReport.id == report_id).first()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+
+    # Delete media files from R2 before deleting the report
+    if report.media_urls and USE_R2 and r2_client:
+        for media_url in report.media_urls:
+            try:
+                parsed = urlparse(media_url)
+                file_key = parsed.path.lstrip('/')
+                r2_client.delete_object(Bucket=R2_BUCKET_NAME, Key=file_key)
+                print(f"Deleted from R2: {file_key}")
+            except Exception as e:
+                print(f"Failed to delete {media_url}: {e}")
+
     db.delete(report)
     db.commit()
 
@@ -182,29 +208,25 @@ import os as _os
 MEDIA_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "media")
 _os.makedirs(MEDIA_DIR, exist_ok=True)
 
-MEDIA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "media")
-os.makedirs(MEDIA_DIR, exist_ok=True)
-
 
 @router.post("/media", status_code=201)
 async def create_report_with_media(
-        address: str = Form(""),
-        lat: float = Form(9.082),
-        lng: float = Form(8.675),
-        water_depth_m: float = Form(0.0),
-        description: str = Form("Unknown flood event"),
-        state: str = Form(""),
-        lga: str = Form(""),
-        image: UploadFile = File(None),
-        voice: UploadFile = File(None),
-        video: UploadFile = File(None),
-        db: Session = Depends(get_db),
-        current_user: Optional[models.User] = Depends(get_current_user_optional),
+    address: str = Form(""),
+    lat: float = Form(9.082),
+    lng: float = Form(8.675),
+    water_depth_m: float = Form(0.0),
+    description: str = Form("Unknown flood event"),
+    state: str = Form(""),
+    lga: str = Form(""),
+    image: UploadFile = File(None),
+    voice: UploadFile = File(None),
+    video: UploadFile = File(None),
+    db: Session = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional),
 ):
     _ALLOWED_EXT = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'webm', 'mov', 'mp3', 'wav', 'ogg', 'm4a'}
 
     def save_to_r2(file: UploadFile, prefix: str) -> Optional[str]:
-        """Upload to Cloudflare R2 and return public URL"""
         if not file or not file.filename or not r2_client:
             return None
 
@@ -212,10 +234,8 @@ async def create_report_with_media(
         if ext not in _ALLOWED_EXT:
             return None
 
-        # Generate unique filename
         file_key = f"reports/{prefix}_{_uuid.uuid4().hex[:12]}.{ext}"
 
-        # Determine content type
         content_type = {
             'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
             'gif': 'image/gif', 'webp': 'image/webp',
@@ -224,7 +244,7 @@ async def create_report_with_media(
         }.get(ext, 'application/octet-stream')
 
         try:
-            content = file.file.read()
+            content = await file.read()  # Use await for async
             r2_client.put_object(
                 Bucket=R2_BUCKET_NAME,
                 Key=file_key,
@@ -236,7 +256,6 @@ async def create_report_with_media(
                     'report_type': prefix
                 }
             )
-            # Return the public URL (using r2.dev or your custom domain)
             return f"https://{R2_BUCKET_NAME}.r2.dev/{file_key}"
         except Exception as e:
             import logging
@@ -244,7 +263,6 @@ async def create_report_with_media(
             return None
 
     def save_to_local(file: UploadFile, prefix: str) -> Optional[str]:
-        """Fallback to local storage"""
         if not file or not file.filename:
             return None
         ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
@@ -252,18 +270,19 @@ async def create_report_with_media(
             return None
         name = f"{prefix}_{_uuid.uuid4().hex[:8]}.{ext}"
         path = os.path.join(MEDIA_DIR, name)
+        content = await file.read()
         with open(path, "wb") as out:
-            out.write(file.file.read())
+            out.write(content)
         return f"/media/{name}"
 
-    # Choose storage method
     save_func = save_to_r2 if USE_R2 and r2_client else save_to_local
 
     media_urls = []
     for f, prefix in [(image, "img"), (voice, "voice"), (video, "video")]:
-        url = save_func(f, prefix)
-        if url:
-            media_urls.append(url)
+        if f:
+            url = await save_func(f, prefix)
+            if url:
+                media_urls.append(url)
 
     report = models.FloodReport(
         lat=lat,
