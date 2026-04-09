@@ -26,6 +26,7 @@ router = APIRouter()
 R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
 R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY_ID", "")
 R2_SECRET_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "")
+CUSTOM_DOMAIN = os.getenv("R2_CUSTOM_DOMAIN", "")
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "nihsa-flood-reports")
 USE_R2 = os.getenv("USE_R2", "false").lower() == "true"
 
@@ -255,7 +256,14 @@ async def create_report_with_media(
                     'report_type': prefix
                 }
             )
-            return f"https://{R2_BUCKET_NAME}.r2.dev/{file_key}"
+
+            # Use custom domain from environment variable
+            CUSTOM_DOMAIN = os.getenv("R2_CUSTOM_DOMAIN", "")
+            if CUSTOM_DOMAIN:
+                return f"https://{CUSTOM_DOMAIN}/{file_key}"
+            else:
+                return f"https://{R2_BUCKET_NAME}.r2.dev/{file_key}"
+
         except Exception as e:
             import logging
             logging.getLogger("nihsa.reports").error(f"R2 upload failed: {e}")
