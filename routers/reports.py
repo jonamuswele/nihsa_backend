@@ -261,7 +261,9 @@ async def create_report_with_media(
             CUSTOM_DOMAIN = os.getenv("R2_CUSTOM_DOMAIN", "")
             if CUSTOM_DOMAIN:
                 return f"https://{CUSTOM_DOMAIN}/{file_key}"
-            
+            else:
+                return f"https://{R2_BUCKET_NAME}.r2.dev/{file_key}"
+
         except Exception as e:
             import logging
             logging.getLogger("nihsa.reports").error(f"R2 upload failed: {e}")
