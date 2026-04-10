@@ -15,6 +15,31 @@ import models, schemas
 from database import get_db
 from auth_utils import require_role
 
+# ── R2 Configuration (same as reports.py) ──────────────────────────────────────
+R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
+R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY_ID", "")
+R2_SECRET_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "")
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "nihsa-flood-reports")
+R2_CUSTOM_DOMAIN = os.getenv("R2_CUSTOM_DOMAIN", "")
+USE_R2 = os.getenv("USE_R2", "false").lower() == "true"
+
+# Initialize R2 client if configured
+r2_client = None
+if USE_R2 and R2_ACCOUNT_ID and R2_ACCESS_KEY and R2_SECRET_KEY:
+    import boto3
+    from botocore.config import Config
+    r2_client = boto3.client(
+        's3',
+        endpoint_url=f'https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com',
+        aws_access_key_id=R2_ACCESS_KEY,
+        aws_secret_access_key=R2_SECRET_KEY,
+        config=Config(signature_version='s3v4'),
+        region_name='auto'
+    )
+    print(f"✅ R2 client initialized for bucket: {R2_BUCKET_NAME}")
+else:
+    print("⚠️ R2 not configured - using local storage only")
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _NFFS_ROOT   = Path(os.getenv("NFFS_ROOT", "/app/nffs_data"))
 _GEOJSON_DIR = _NFFS_ROOT / "results" / "atlas" / "geojson"
@@ -234,6 +259,36 @@ def _csv_to_fc(content_bytes: bytes, layer_key: str) -> dict:
         })
 
     return {"type": "FeatureCollection", "features": features, "_skipped": skipped}
+
+
+# ── Helper function to upload to R2 ────────────────────────────────────────────
+def _upload_to_r2(file_key: str, content: bytes, content_type: str = "application/json") -> bool:
+    """Upload a file to Cloudflare R2 bucket."""
+    if not USE_R2 or not r2_client:
+        return False
+    try:
+        r2_client.put_object(
+            Bucket=R2_BUCKET_NAME,
+            Key=file_key,
+            Body=content,
+            ContentType=content_type,
+            Metadata={
+                'uploaded_by': 'map_layers_admin',
+                'uploaded_at': datetime.utcnow().isoformat()
+            }
+        )
+        return True
+    except Exception as e:
+        print(f"❌ R2 upload failed for {file_key}: {e}")
+        return False
+
+
+def _get_r2_url(file_key: str) -> str:
+    """Get the public URL for a file in R2."""
+    if R2_CUSTOM_DOMAIN:
+        return f"https://{R2_CUSTOM_DOMAIN}/{file_key}"
+    else:
+        return f"https://{R2_BUCKET_NAME}.r2.dev/{file_key}"
 
 
 # ── Default layer catalogue ────────────────────────────────────────────────────
@@ -594,11 +649,33 @@ async def upload_layer_csv(
             ),
         )
 
-    # Save GeoJSON to disk
+    # Save GeoJSON to disk (local backup)
     out_name = _KEY_TO_FILE.get(layer.layer_key, f"{layer.layer_key}.geojson")
-    out_path  = _GEOJSON_DIR / out_name
+    out_path = _GEOJSON_DIR / out_name
     out_path.write_text(json.dumps(geojson), encoding="utf-8")
     size_kb = out_path.stat().st_size // 1024
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # NEW: Upload GeoJSON to R2 for public access
+    # ──────────────────────────────────────────────────────────────────────────
+    r2_url = None
+    if USE_R2 and r2_client:
+        r2_key = f"nffs/atlas/geojson/{out_name}"
+        geojson_bytes = json.dumps(geojson).encode('utf-8')
+        
+        if _upload_to_r2(r2_key, geojson_bytes, 'application/json'):
+            r2_url = _get_r2_url(r2_key)
+            print(f"✅ GeoJSON uploaded to R2: {r2_url}")
+            
+            # Update source_url to point to R2
+            layer.source_url = r2_url
+        else:
+            # Fallback to local path
+            layer.source_url = f"geojson/{out_name}"
+            print(f"⚠️ R2 upload failed, using local path: geojson/{out_name}")
+    else:
+        layer.source_url = f"geojson/{out_name}"
+        print(f"⚠️ R2 not configured, using local path: geojson/{out_name}")
 
     # Update layer meta in DB
     meta = dict(layer.meta or {})
@@ -609,9 +686,9 @@ async def upload_layer_csv(
         "rows_skipped":    n_skipped,
         "uploaded_at":     datetime.now(timezone.utc).isoformat(),
         "source_filename": filename,
+        "r2_url":          r2_url if r2_url else None,
     })
-    layer.meta       = meta
-    layer.source_url = f"geojson/{out_name}"
+    layer.meta = meta
     db.commit()
     db.refresh(layer)
 
@@ -621,8 +698,10 @@ async def upload_layer_csv(
         "feature_count": n_features,
         "rows_skipped":  n_skipped,
         "size_kb":       size_kb,
+        "r2_url":        r2_url,
         "message": (
             f"{n_features:,} features loaded successfully"
             + (f" ({n_skipped} rows skipped — missing or invalid coordinates)" if n_skipped else "")
+            + (f" ✅ Uploaded to R2" if r2_url else " ⚠️ Local storage only")
         ),
     }
