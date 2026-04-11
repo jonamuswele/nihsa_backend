@@ -342,6 +342,37 @@ def update_map_layer(
     db.refresh(layer)
     return layer
     
+@router.delete("/{layer_id}", status_code=204)
+def delete_map_layer(
+    layer_id: str,
+    db: Session = Depends(get_db),
+    _user=Depends(require_role(models.UserRole.ADMIN)),
+):
+    """Delete a map layer."""
+    layer = db.query(models.MapLayer).filter(models.MapLayer.id == layer_id).first()
+    if not layer:
+        raise HTTPException(status_code=404, detail="Layer not found")
+    db.delete(layer)
+    db.commit()
+    return
+
+@router.post("", response_model=schemas.MapLayerOut, status_code=201)
+def create_map_layer(
+    body: schemas.MapLayerCreate,
+    db: Session = Depends(get_db),
+    _user=Depends(require_role(models.UserRole.NIHSA_STAFF, models.UserRole.ADMIN, models.UserRole.SUB_ADMIN)),
+):
+    """Create a new map layer."""
+    if db.query(models.MapLayer).filter(models.MapLayer.layer_key == body.layer_key).first():
+        raise HTTPException(status_code=409, detail=f"layer_key '{body.layer_key}' already exists")
+    layer = models.MapLayer(
+        id=str(uuid.uuid4()),
+        **body.model_dump()
+    )
+    db.add(layer)
+    db.commit()
+    db.refresh(layer)
+    return layer
 
 @router.post("/seed", status_code=201)
 def seed_map_layers(
