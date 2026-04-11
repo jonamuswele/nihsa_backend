@@ -219,6 +219,9 @@ class AlertOut(BaseModel):
     is_active: bool = True
     is_published: bool = False
     created_at: datetime
+    lat: Optional[float] = None   
+    lng: Optional[float] = None 
+    
     class Config:
         from_attributes = True
 
