@@ -24,7 +24,7 @@ from auth_utils import verify_password
 from auth_utils import hash_password
 import models as m
 from sqlalchemy import text
-from routers.map_layers import DEFAULT_LAYERS
+
 
 class ConnectionManager:
     def __init__(self):
