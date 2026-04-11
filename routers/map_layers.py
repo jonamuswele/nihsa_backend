@@ -259,8 +259,8 @@ lat,lon,name,state,lga
 async def upload_layer_data(
         layer_id: str,
         file: UploadFile = File(...),
-        db: Session = Depends(get_db),
-        _user=Depends(require_role(models.UserRole.NIHSA_STAFF, models.UserRole.ADMIN, models.UserRole.SUB_ADMIN)),
+        db: Session = Depends(get_db)#,
+        #_user=Depends(require_role(models.UserRole.NIHSA_STAFF, models.UserRole.ADMIN, models.UserRole.SUB_ADMIN)),
 ):
     
     print("=" * 60)
