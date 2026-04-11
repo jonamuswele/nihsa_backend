@@ -23,7 +23,7 @@ USE_R2 = os.getenv("USE_R2", "true").lower() == "true"
 
 # Directory structure mapping layer_key → R2 folder path
 LAYER_TO_FOLDER = {
-    # Annual Forecast
+    
     "fc_flood_extent": "forecast/flood_extent.geojson",
     "fc_population": "forecast/population.geojson",
     "fc_communities": "forecast/communities.geojson",
