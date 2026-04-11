@@ -24,6 +24,7 @@ from auth_utils import verify_password
 from auth_utils import hash_password
 import models as m
 from sqlalchemy import text
+from routers.map_layers import DEFAULT_LAYERS
 
 
 class ConnectionManager:
@@ -119,7 +120,7 @@ async def lifespan(app: FastAPI):
     db2 = SessionLocal()
     try:
         
-        for d in _DEFAULT_LAYERS:
+        for d in DEFAULT_LAYERS:
             exists = db2.query(m.MapLayer).filter(m.MapLayer.layer_key == d["layer_key"]).first()
             if not exists:
                 db2.add(m.MapLayer(**d))
