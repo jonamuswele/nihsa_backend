@@ -264,17 +264,15 @@ async def upload_layer_data(
         layer_id: str,
         request: FileUploadRequest,
         db: Session = Depends(get_db),
-        #_user=Depends(require_role(...))
 ):
-    # Convert the content string back to bytes
-    content = request.content.encode('utf-8')
-    filename = request.filename
     print("=" * 60)
     print("🚨 UPLOAD FUNCTION WAS CALLED! 🚨")
     print(f"Layer ID: {layer_id}")
     print("=" * 60)
     
-    """Upload CSV file for a map layer to R2"""
+    # Get data from JSON request
+    content = request.content.encode('utf-8')
+    filename = request.filename
 
     layer = db.query(models.MapLayer).filter(models.MapLayer.id == layer_id).first()
     if not layer:
@@ -282,9 +280,6 @@ async def upload_layer_data(
 
     if not USE_R2 or not r2_client:
         raise HTTPException(status_code=503, detail="R2 storage not configured")
-
-    content = await file.read()
-    filename = file.filename or ""
 
     if not filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Only CSV files are supported")
