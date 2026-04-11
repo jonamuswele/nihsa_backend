@@ -18,6 +18,18 @@ from auth_utils import require_role
 
 router = APIRouter()
 
+@router.post("/test-upload")
+async def test_upload_only(file: UploadFile = File(...)):
+    """Simple test upload - no database, no R2"""
+    print(f"🔵 TEST UPLOAD CALLED! File: {file.filename}")
+    content = await file.read()
+    print(f"🔵 File size: {len(content)} bytes")
+    return {
+        "success": True, 
+        "filename": file.filename,
+        "size_bytes": len(content)
+    }
+    
 @router.get("/ping")
 def ping():
     print("✅ PING endpoint called!")
@@ -30,6 +42,15 @@ R2_SECRET_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "")
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "nihsamedia")
 R2_CUSTOM_DOMAIN = os.getenv("R2_CUSTOM_DOMAIN", "")
 USE_R2 = os.getenv("USE_R2", "false").lower() == "true"
+
+print("=" * 50)
+print("🔍 ENVIRONMENT VARIABLES CHECK:")
+print(f"USE_R2 = {os.getenv('USE_R2', 'NOT SET')}")
+print(f"R2_ACCOUNT_ID = {os.getenv('R2_ACCOUNT_ID', 'NOT SET')[:10] if os.getenv('R2_ACCOUNT_ID') else 'NOT SET'}...")
+print(f"R2_ACCESS_KEY_ID = {'SET' if os.getenv('R2_ACCESS_KEY_ID') else 'NOT SET'}")
+print(f"R2_SECRET_ACCESS_KEY = {'SET' if os.getenv('R2_SECRET_ACCESS_KEY') else 'NOT SET'}")
+print(f"R2_BUCKET_NAME = {os.getenv('R2_BUCKET_NAME', 'NOT SET')}")
+print("=" * 50)
 
 r2_client = None
 if USE_R2 and R2_ACCOUNT_ID and R2_ACCESS_KEY and R2_SECRET_KEY:
