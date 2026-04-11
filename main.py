@@ -218,6 +218,10 @@ app.include_router(seasonal.router,    prefix="/api/seasonal",     tags=["Season
 app.include_router(assistant.router,   prefix="/api/assistant",    tags=["Assistant"])
 app.include_router(map_layers.router,  prefix="/api/map-layers",   tags=["Map Layers"])
 
+@app.get("/api")
+async def api_root():
+    return {"status": "ok", "message": "NIHSA API is running", "version": "1.0.0"}
+    
 @app.get("/api/debug/admin-check")
 async def check_admin(db: Session = Depends(get_db)):
     from auth_utils import verify_password
