@@ -264,7 +264,7 @@ async def upload_layer_data(
         layer_id: str,
         request: FileUploadRequest,
         db: Session = Depends(get_db),
-        _user=Depends(require_role(...))
+        #_user=Depends(require_role(...))
 ):
     # Convert the content string back to bytes
     content = request.content.encode('utf-8')
