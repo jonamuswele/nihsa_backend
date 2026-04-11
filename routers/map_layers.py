@@ -1,9 +1,5 @@
 """map_layers.py - Complete working version with R2 storage"""
 
-@router.get("/ping")
-def ping():
-    print("✅ PING endpoint called!")
-    return {"status": "alive", "message": "Map layers router is working!"}
 
 import os
 import json
@@ -21,6 +17,11 @@ import models, schemas
 from auth_utils import require_role
 
 router = APIRouter()
+
+@router.get("/ping")
+def ping():
+    print("✅ PING endpoint called!")
+    return {"status": "alive", "message": "Map layers router is working!"}
 
 # R2 Configuration
 R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
