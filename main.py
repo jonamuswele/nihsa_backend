@@ -226,6 +226,34 @@ app.include_router(map_layers.router,  prefix="/api/map-layers",   tags=["Map La
 async def api_root():
     return {"status": "ok", "message": "NIHSA API is running", "version": "1.0.0"}
 
+@app.get("/api/proxy/csv")
+async def proxy_csv(url: str):
+    """Proxy CSV files from R2 to avoid CORS issues."""
+    import httpx
+    from fastapi.responses import Response
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url)
+            
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=502, 
+                    detail=f"R2 returned {response.status_code}"
+                )
+            
+            return Response(
+                content=response.content,
+                media_type="text/csv",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "public, max-age=300"
+                }
+            )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Proxy error: {str(e)}")
+        
+
 @app.get("/api/proxy/geojson")
 async def proxy_geojson(url: str):
     """
