@@ -369,6 +369,23 @@ async def ws_chat(ws: WebSocket, channel_id: str):
     except WebSocketDisconnect:
         manager.disconnect(ws, channel_id)
 
+@app.get("/api/proxy/html")
+async def proxy_html(url: str):
+    """Proxy HTML files to avoid CSP issues in WebView."""
+    import httpx
+    from fastapi.responses import HTMLResponse
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url)
+            return HTMLResponse(
+                content=response.text,
+                status_code=response.status_code
+            )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Proxy error: {str(e)}")
+
+
 @app.websocket("/ws/gauges")
 async def ws_gauges(ws: WebSocket):
     await ws.accept()
