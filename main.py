@@ -63,6 +63,8 @@ async def lifespan(app: FastAPI):
         migrations = [
             "ALTER TABLE users ADD COLUMN sub_admin_scope VARCHAR(60)",
             "UPDATE map_layers SET layer_type='geojson_fc' WHERE layer_key='sw_satellite' AND layer_type='toggle'",
+            "ALTER TABLE flood_alerts ADD COLUMN IF NOT EXISTS lat FLOAT",
+            "ALTER TABLE flood_alerts ADD COLUMN IF NOT EXISTS lng FLOAT",
         ]
         for sql in migrations:
             try:
