@@ -11,7 +11,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
-
+from pydantic import BaseModel
 from database import get_db
 import models, schemas
 from auth_utils import require_role
@@ -255,14 +255,20 @@ lat,lon,name,state,lga
     )
 
 
+class FileUploadRequest(BaseModel):
+    filename: str
+    content: str
+
 @router.post("/{layer_id}/upload", status_code=201)
 async def upload_layer_data(
         layer_id: str,
-        file: UploadFile = File(...),
-        db: Session = Depends(get_db)#,
-        #_user=Depends(require_role(models.UserRole.NIHSA_STAFF, models.UserRole.ADMIN, models.UserRole.SUB_ADMIN)),
+        request: FileUploadRequest,
+        db: Session = Depends(get_db),
+        _user=Depends(require_role(...))
 ):
-    
+    # Convert the content string back to bytes
+    content = request.content.encode('utf-8')
+    filename = request.filename
     print("=" * 60)
     print("🚨 UPLOAD FUNCTION WAS CALLED! 🚨")
     print(f"Layer ID: {layer_id}")
