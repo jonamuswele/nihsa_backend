@@ -320,6 +320,28 @@ async def upload_layer_data(
         "message": f"Successfully uploaded {feature_count:,} features"
     }
 
+@router.put("/{layer_id}", response_model=schemas.MapLayerOut)
+@router.patch("/{layer_id}", response_model=schemas.MapLayerOut)
+def update_map_layer(
+    layer_id: str,
+    body: schemas.MapLayerUpdate,
+    db: Session = Depends(get_db),
+    _user=Depends(require_role(models.UserRole.NIHSA_STAFF, models.UserRole.ADMIN, models.UserRole.SUB_ADMIN)),
+):
+    """Update a map layer's settings (default_visible, is_active, etc)."""
+    layer = db.query(models.MapLayer).filter(
+        models.MapLayer.id == layer_id
+    ).first()
+    if not layer:
+        raise HTTPException(status_code=404, detail="Layer not found")
+    
+    for k, v in body.model_dump(exclude_none=True).items():
+        setattr(layer, k, v)
+    
+    db.commit()
+    db.refresh(layer)
+    return layer
+    
 
 @router.post("/seed", status_code=201)
 def seed_map_layers(
