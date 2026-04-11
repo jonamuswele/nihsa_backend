@@ -30,6 +30,7 @@ if USE_R2 and R2_ACCOUNT_ID and R2_ACCESS_KEY and R2_SECRET_KEY:
     try:
         import boto3
         from botocore.config import Config
+
         r2_client = boto3.client(
             's3',
             endpoint_url=f'https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com',
@@ -53,20 +54,20 @@ def csv_to_geojson(content_bytes: bytes):
     """Convert CSV to GeoJSON"""
     text = content_bytes.decode("utf-8", errors="ignore").lstrip("\ufeff")
     reader = csv.DictReader(io.StringIO(text))
-    
+
     features = []
     skipped = 0
-    
+
     for row in reader:
         norm = {k.strip().lower(): v.strip() for k, v in row.items()}
-        
+
         lat = norm.get("lat") or norm.get("latitude")
         lon = norm.get("lon") or norm.get("longitude") or norm.get("lng")
-        
+
         if not lat or not lon:
             skipped += 1
             continue
-        
+
         try:
             lat_val = float(lat)
             lon_val = float(lon)
@@ -76,7 +77,7 @@ def csv_to_geojson(content_bytes: bytes):
         except ValueError:
             skipped += 1
             continue
-        
+
         props = {}
         for k, v in norm.items():
             if k not in ["lat", "latitude", "lon", "longitude", "lng"] and v:
@@ -84,13 +85,13 @@ def csv_to_geojson(content_bytes: bytes):
                     props[k] = float(v) if "." in v else int(v)
                 except ValueError:
                     props[k] = v
-        
+
         features.append({
             "type": "Feature",
             "geometry": {"type": "Point", "coordinates": [lon_val, lat_val]},
             "properties": props
         })
-    
+
     return json.dumps({"type": "FeatureCollection", "features": features}), len(features), skipped
 
 
@@ -109,7 +110,7 @@ DEFAULT_LAYERS = [
     {"group_key": "surface_water", "layer_key": "reports", "name": "Citizen Flood Reports",
      "description": "Verified field reports", "icon": "💧", "layer_type": "toggle",
      "display_order": 3, "is_active": True, "default_visible": False},
-    
+
     # Annual Forecast
     {"group_key": "forecast", "layer_key": "fc_flood_extent", "name": "Flood Extent & Depth",
      "description": "Annual inundation extent", "icon": "💧", "layer_type": "geojson_fc",
@@ -132,7 +133,7 @@ DEFAULT_LAYERS = [
     {"group_key": "forecast", "layer_key": "fc_roads", "name": "Road Network at Risk",
      "description": "Roads vulnerable", "icon": "🛣️", "layer_type": "geojson_fc",
      "display_order": 7, "is_active": True, "default_visible": False},
-    
+
     # Weekly Forecast
     {"group_key": "forecast_weekly", "layer_key": "fw_flood_extent", "name": "Weekly Flood Extent",
      "description": "Current week inundation", "icon": "💧", "layer_type": "geojson_fc",
@@ -149,7 +150,7 @@ DEFAULT_LAYERS = [
      "icon": "🌾", "layer_type": "geojson_fc", "display_order": 6, "is_active": True, "default_visible": False},
     {"group_key": "forecast_weekly", "layer_key": "fw_roads", "name": "Weekly Roads at Risk",
      "icon": "🛣️", "layer_type": "geojson_fc", "display_order": 7, "is_active": True, "default_visible": False},
-    
+
     # Groundwater
     {"group_key": "groundwater", "layer_key": "gw_levels", "name": "Groundwater Levels",
      "icon": "🔵", "layer_type": "geojson_fc", "display_order": 1, "is_active": True, "default_visible": False},
@@ -157,7 +158,7 @@ DEFAULT_LAYERS = [
      "icon": "🗺️", "layer_type": "geojson_fc", "display_order": 2, "is_active": True, "default_visible": False},
     {"group_key": "groundwater", "layer_key": "gw_recharge", "name": "Recharge Areas",
      "icon": "♻️", "layer_type": "geojson_fc", "display_order": 3, "is_active": True, "default_visible": False},
-    
+
     # Water Quality
     {"group_key": "water_quality", "layer_key": "wq_index", "name": "Water Quality Index",
      "icon": "🧪", "layer_type": "geojson_fc", "display_order": 1, "is_active": True, "default_visible": False},
@@ -165,7 +166,7 @@ DEFAULT_LAYERS = [
      "icon": "🌊", "layer_type": "geojson_fc", "display_order": 2, "is_active": True, "default_visible": False},
     {"group_key": "water_quality", "layer_key": "wq_contamination", "name": "Contamination Risk",
      "icon": "⚗️", "layer_type": "geojson_fc", "display_order": 3, "is_active": True, "default_visible": False},
-    
+
     # Coastal & Marine
     {"group_key": "coastal_marine", "layer_key": "cm_coastal_risk", "name": "Coastal Flood Risk",
      "icon": "🏖️", "layer_type": "geojson_fc", "display_order": 1, "is_active": True, "default_visible": False},
@@ -192,8 +193,8 @@ def list_map_layers(db: Session = Depends(get_db)):
 
 @router.get("/all", response_model=List[schemas.MapLayerOut])
 def list_all_map_layers(
-    db: Session = Depends(get_db),
-    _user=Depends(require_role(models.UserRole.NIHSA_STAFF, models.UserRole.ADMIN, models.UserRole.SUB_ADMIN)),
+        db: Session = Depends(get_db),
+        _user=Depends(require_role(models.UserRole.NIHSA_STAFF, models.UserRole.ADMIN, models.UserRole.SUB_ADMIN)),
 ):
     """Admin: all layers including inactive"""
     return db.query(models.MapLayer).order_by(
@@ -203,15 +204,15 @@ def list_all_map_layers(
 
 @router.get("/{layer_id}/template")
 def download_csv_template(
-    layer_id: str,
-    db: Session = Depends(get_db),
-    _user=Depends(require_role(models.UserRole.NIHSA_STAFF, models.UserRole.ADMIN, models.UserRole.SUB_ADMIN)),
+        layer_id: str,
+        db: Session = Depends(get_db),
+        _user=Depends(require_role(models.UserRole.NIHSA_STAFF, models.UserRole.ADMIN, models.UserRole.SUB_ADMIN)),
 ):
     """Download CSV template for a layer"""
     layer = db.query(models.MapLayer).filter(models.MapLayer.id == layer_id).first()
     if not layer:
         raise HTTPException(status_code=404, detail="Layer not found")
-    
+
     template = f"""# Template for {layer.name}
 # Required columns: lat, lon
 # Optional columns: name, state, lga, risk_zone, depth, population, etc.
@@ -229,32 +230,38 @@ lat,lon,name,state,lga
 
 @router.post("/{layer_id}/upload", status_code=201)
 async def upload_layer_data(
-    layer_id: str,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    _user=Depends(require_role(models.UserRole.NIHSA_STAFF, models.UserRole.ADMIN, models.UserRole.SUB_ADMIN)),
+        layer_id: str,
+        file: UploadFile = File(...),
+        db: Session = Depends(get_db),
+        _user=Depends(require_role(models.UserRole.NIHSA_STAFF, models.UserRole.ADMIN, models.UserRole.SUB_ADMIN)),
 ):
-    """Upload CSV file for a map layer to R2"""
     
+    print("=" * 60)
+    print("🚨 UPLOAD FUNCTION WAS CALLED! 🚨")
+    print(f"Layer ID: {layer_id}")
+    print("=" * 60)
+    
+    """Upload CSV file for a map layer to R2"""
+
     layer = db.query(models.MapLayer).filter(models.MapLayer.id == layer_id).first()
     if not layer:
         raise HTTPException(status_code=404, detail="Layer not found")
-    
+
     if not USE_R2 or not r2_client:
         raise HTTPException(status_code=503, detail="R2 storage not configured")
-    
+
     content = await file.read()
     filename = file.filename or ""
-    
+
     if not filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Only CSV files are supported")
-    
+
     # Convert CSV to GeoJSON
     geojson_str, feature_count, skipped = csv_to_geojson(content)
-    
+
     if feature_count == 0:
         raise HTTPException(status_code=400, detail="No valid features found. Check lat/lon columns.")
-    
+
     # Upload to R2
     file_key = f"map-layers/{layer.layer_key}.geojson"
     r2_client.put_object(
@@ -263,9 +270,9 @@ async def upload_layer_data(
         Body=geojson_str.encode('utf-8'),
         ContentType="application/geo+json"
     )
-    
+
     public_url = get_public_url(file_key)
-    
+
     # Update database
     layer.source_url = public_url
     layer.meta = {
@@ -275,7 +282,7 @@ async def upload_layer_data(
         "filename": filename
     }
     db.commit()
-    
+
     return {
         "success": True,
         "feature_count": feature_count,
@@ -288,8 +295,8 @@ async def upload_layer_data(
 
 @router.post("/seed", status_code=201)
 def seed_map_layers(
-    db: Session = Depends(get_db),
-    _user=Depends(require_role(models.UserRole.ADMIN)),
+        db: Session = Depends(get_db),
+        _user=Depends(require_role(models.UserRole.ADMIN)),
 ):
     """Seed default layers into database"""
     added = 0
