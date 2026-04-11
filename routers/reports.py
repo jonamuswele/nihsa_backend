@@ -158,11 +158,12 @@ def verify_report(
         )
         alert = models.FloodAlert(
             title=f"Verified Flood Report — {location_label}",
-            message=(report.description or "A field flood report has been verified by NIHSA.")
-                    + (f"\n\nLocation: {location_label}" if location_label else ""),
+            message=...,
             level=alert_level,
             state=report.state,
             lgas=[report.lga] if report.lga else [],
+            lat=report.lat,      
+            lng=report.lng,      
             is_active=True,
             is_published=True,
             issued_by=current_user.id,
