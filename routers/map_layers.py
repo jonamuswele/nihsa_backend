@@ -17,7 +17,7 @@ from r2_storage import (
 
 router = APIRouter()
 
-# CSV Templates for each layer (same as before)
+# CSV Templates for each layer 
 _CSV_TEMPLATES = {
     "fc_flood_extent": {
         "columns": "risk_zone,state,lga,lat,lon",
