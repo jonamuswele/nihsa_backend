@@ -251,7 +251,9 @@ class FloodAlert(Base):
     issued_by   = Column(String, ForeignKey("users.id"))
     created_at  = Column(DateTime(timezone=True), server_default=func.now())
     updated_at  = Column(DateTime(timezone=True), onupdate=func.now())
-
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+  
     basin = relationship("RiverBasin", back_populates="alerts")
 
     __table_args__ = (
