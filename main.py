@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
     
     with engine.connect() as conn:
         migrations = [
-            "ALTER TABLE users ADD COLUMN sub_admin_scope VARCHAR(60)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS sub_admin_scope VARCHAR(60)",
             "UPDATE map_layers SET layer_type='geojson_fc' WHERE layer_key='sw_satellite' AND layer_type='toggle'",
             "ALTER TABLE flood_alerts ADD COLUMN IF NOT EXISTS lat FLOAT",
             "ALTER TABLE flood_alerts ADD COLUMN IF NOT EXISTS lng FLOAT",
@@ -70,8 +70,9 @@ async def lifespan(app: FastAPI):
             try:
                 conn.execute(text(sql))
                 conn.commit()
-            except Exception:
-                pass  
+                print(f"✅ Migration executed: {sql[:50]}...")
+            except Exception as e:
+                print(f"❌ Migration failed: {sql[:50]}... Error: {e}")
 
     
     db = SessionLocal()
