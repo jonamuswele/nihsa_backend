@@ -1,5 +1,10 @@
 """map_layers.py - Complete working version with R2 storage"""
 
+@router.get("/ping")
+def ping():
+    print("✅ PING endpoint called!")
+    return {"status": "alive", "message": "Map layers router is working!"}
+
 import os
 import json
 import csv
