@@ -158,7 +158,7 @@ def verify_report(
         )
         alert = models.FloodAlert(
             title=f"Verified Flood Report — {location_label}",
-            message=...,
+            message=report.description or f"Verified flood report from {location_label} with water depth of {report.water_depth_m or 'unknown'} meters.",
             level=alert_level,
             state=report.state,
             lgas=[report.lga] if report.lga else [],
