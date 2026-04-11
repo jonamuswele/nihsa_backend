@@ -25,7 +25,8 @@ from auth_utils import hash_password
 import models as m
 from sqlalchemy import text
 from routers.map_layers import DEFAULT_LAYERS
-
+import httpx
+from fastapi.responses import Response
 
 class ConnectionManager:
     def __init__(self):
@@ -225,21 +226,38 @@ async def api_root():
 @app.get("/api/proxy/geojson")
 async def proxy_geojson(url: str):
     """
-    Proxy GeoJSON files from R2 to avoid CORS issues in WebView.
+    Proxy GeoJSON files from R2 to avoid CORS issues in Android WebView.
     Your app calls: /api/proxy/geojson?url=https://nihsadocuments.com/map-layers/fc_health.geojson
     """
     import httpx
+    from fastapi.responses import Response
     
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             response = await client.get(url)
+            
+            # Check if the request was successful
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=502, 
+                    detail=f"R2 returned {response.status_code}: {response.text[:100]}"
+                )
+            
+            # Return the GeoJSON with proper headers
             return Response(
                 content=response.content,
                 media_type="application/json",
-                headers={"Access-Control-Allow-Origin": "*"}
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "public, max-age=300"
+                }
             )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="R2 request timeout")
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"R2 error: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Proxy error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}")
         
 @app.get("/api/debug/admin-check")
 async def check_admin(db: Session = Depends(get_db)):
