@@ -221,7 +221,26 @@ app.include_router(map_layers.router,  prefix="/api/map-layers",   tags=["Map La
 @app.get("/api")
 async def api_root():
     return {"status": "ok", "message": "NIHSA API is running", "version": "1.0.0"}
+
+@app.get("/api/proxy/geojson")
+async def proxy_geojson(url: str):
+    """
+    Proxy GeoJSON files from R2 to avoid CORS issues in WebView.
+    Your app calls: /api/proxy/geojson?url=https://nihsadocuments.com/map-layers/fc_health.geojson
+    """
+    import httpx
     
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url)
+            return Response(
+                content=response.content,
+                media_type="application/json",
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Proxy error: {str(e)}")
+        
 @app.get("/api/debug/admin-check")
 async def check_admin(db: Session = Depends(get_db)):
     from auth_utils import verify_password
