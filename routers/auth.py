@@ -283,6 +283,25 @@ def delete_user(
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Null out foreign key references to this user before deleting
+    # to avoid FK constraint violations
+    db.query(models.FloodAlert).filter(
+        models.FloodAlert.issued_by == user_id
+    ).update({"issued_by": None}, synchronize_session=False)
+
+    db.query(models.FloodReport).filter(
+        models.FloodReport.user_id == user_id
+    ).update({"user_id": None}, synchronize_session=False)
+
+    db.query(models.FloodReport).filter(
+        models.FloodReport.verified_by == user_id
+    ).update({"verified_by": None}, synchronize_session=False)
+
+    db.query(models.VanguardChatMessage).filter(
+        models.VanguardChatMessage.user_id == user_id
+    ).update({"user_id": None}, synchronize_session=False)
+
     db.delete(user)
     db.commit()
     return {"message": f"User '{user.name}' deleted"}
