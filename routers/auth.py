@@ -9,17 +9,60 @@ import json
 from database import get_db
 import models, schemas
 from auth_utils import hash_password, verify_password, create_access_token, get_current_user
+from pydantic import BaseModel
 
 router = APIRouter()
 
 
-@router.post("/login", response_model=schemas.TokenResponse)
-@router.post("/token", response_model=schemas.TokenResponse)
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: schemas.UserOut
+    expires_in: int = 86400  # 24 hours in seconds
+
+
+@router.post("/refresh", response_model=TokenResponse)
+def refresh_access_token(body: RefreshTokenRequest, db: Session = Depends(get_db)):
+    """Get a new access token using a valid refresh token."""
+    try:
+        payload = jwt.decode(body.refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        
+        # ✅ Verify it's a refresh token
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+        
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+        
+        user = db.query(models.User).filter(models.User.id == str(user_id)).first()
+        if not user or not user.is_active:
+            raise HTTPException(status_code=401, detail="User not found or inactive")
+        
+        # Create new tokens
+        access_token = create_access_token({"sub": str(user.id), "role": user.role.value, "scope": user.sub_admin_scope})
+        refresh_token = create_refresh_token({"sub": str(user.id)})
+        
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            user=schemas.UserOut.from_orm(user),
+            expires_in=ACCESS_TOKEN_EXPIRE_HOURS * 3600
+        )
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
+
+@router.post("/login", response_model=TokenResponse)
 def login(
     username: str = Form(...),
     password: str = Form(...),
     db: Session = Depends(get_db),
-    ):
+):
     user = db.query(models.User).filter(
         (models.User.email == username) | (models.User.phone_number == username)
     ).first()
@@ -27,10 +70,20 @@ def login(
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account suspended")
+    
     user.last_login = datetime.utcnow()
     db.commit()
-    token = create_access_token({"sub": str(user.id), "role": user.role.value, "scope": user.sub_admin_scope})
-    return schemas.TokenResponse(access_token=token, user=user)
+    
+    # ✅ Create both access and refresh tokens
+    access_token = create_access_token({"sub": str(user.id), "role": user.role.value, "scope": user.sub_admin_scope})
+    refresh_token = create_refresh_token({"sub": str(user.id)})
+    
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=schemas.UserOut.from_orm(user),
+        expires_in=ACCESS_TOKEN_EXPIRE_HOURS * 3600
+    )
 
 
 
