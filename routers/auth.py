@@ -8,14 +8,25 @@ from typing import Optional, Union
 import json
 from database import get_db
 import models, schemas
-from auth_utils import hash_password, verify_password, create_access_token, get_current_user
+from auth_utils import (
+    hash_password, 
+    verify_password, 
+    create_access_token,
+    create_refresh_token,  # ✅ ADDED
+    get_current_user,
+    SECRET_KEY,            # ✅ ADDED
+    ALGORITHM,             # ✅ ADDED
+    ACCESS_TOKEN_EXPIRE_HOURS  # ✅ ADDED
+)
 from pydantic import BaseModel
+from jose import JWTError, jwt  # ✅ ADDED
 
 router = APIRouter()
 
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
+
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -86,21 +97,36 @@ def login(
     )
 
 
-
-@router.post("/register", response_model=schemas.TokenResponse, status_code=201)
+@router.post("/register", response_model=TokenResponse, status_code=201)  # ✅ Changed to TokenResponse
 def register(body: schemas.UserRegister, db: Session = Depends(get_db)):
     if body.email and db.query(models.User).filter(models.User.email == body.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     if body.phone_number and db.query(models.User).filter(models.User.phone_number == body.phone_number).first():
         raise HTTPException(status_code=400, detail="Phone number already registered")
+    
     user = models.User(
-        name=body.name, email=body.email, phone_number=body.phone_number or None,
+        name=body.name, 
+        email=body.email, 
+        phone_number=body.phone_number or None,
         password_hash=hash_password(body.password),
-        role=models.UserRole.CITIZEN, state=body.state, lga=body.lga,
+        role=models.UserRole.CITIZEN, 
+        state=body.state, 
+        lga=body.lga,
     )
-    db.add(user); db.commit(); db.refresh(user)
-    token = create_access_token({"sub": str(user.id), "role": user.role.value})
-    return schemas.TokenResponse(access_token=token, user=user)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    
+    # ✅ Create both access and refresh tokens
+    access_token = create_access_token({"sub": str(user.id), "role": user.role.value})
+    refresh_token = create_refresh_token({"sub": str(user.id)})
+    
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=schemas.UserOut.from_orm(user),
+        expires_in=ACCESS_TOKEN_EXPIRE_HOURS * 3600
+    )
 
 
 @router.post("/seed-admins")
@@ -112,8 +138,14 @@ def seed_admins(db: Session = Depends(get_db)):
     ]
     for u in defaults:
         if not db.query(models.User).filter(models.User.email == u["email"]).first():
-            db.add(models.User(name=u["name"], email=u["email"], phone_number=u["phone"],
-                               password_hash=hash_password(u["password"]), role=u["role"], is_active=True))
+            db.add(models.User(
+                name=u["name"], 
+                email=u["email"], 
+                phone_number=u["phone"],
+                password_hash=hash_password(u["password"]), 
+                role=u["role"], 
+                is_active=True
+            ))
             created.append(u["email"])
     db.commit()
     return {"message": "Created: " + ", ".join(created) if created else "Already exist"}
@@ -125,19 +157,22 @@ def get_me(current_user: models.User = Depends(get_current_user)):
 
 
 # ── Forgot Password (Resend email service) ─────────────────────────────────────
-from pydantic import BaseModel as _BaseModel
 
-class ForgotPasswordRequest(_BaseModel):
+class ForgotPasswordRequest(BaseModel):
     email: str
 
-class ResetPasswordRequest(_BaseModel):
+
+class ResetPasswordRequest(BaseModel):
     email: str
     otp: str
     new_password: str
 
+
 # In-memory OTP store (use Redis in production)
-import secrets, time as _time
+import secrets
+import time as _time
 _otp_store: dict = {}  # email -> (otp, expires_at)
+
 
 @router.post("/forgot-password")
 def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
@@ -152,7 +187,8 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
         resend_key = os.getenv("RESEND_API_KEY")
         if resend_key:
             try:
-                import urllib.request, json as _json
+                import urllib.request
+                import json as _json
                 payload = _json.dumps({
                     "from": "NIHSA Platform <noreply@nihsa.gov.ng>",
                     "to": [body.email],
@@ -207,7 +243,6 @@ def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    from auth_utils import hash_password
     user.password_hash = hash_password(body.new_password[:72])
     db.commit()
     del _otp_store[body.email]
@@ -216,15 +251,17 @@ def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
 
 # ── Admin: User Management ─────────────────────────────────────────────────────
 
-from pydantic import BaseModel as _BM
 from auth_utils import require_admin, require_government
 
-class RoleAssignRequest(_BM):
+
+class RoleAssignRequest(BaseModel):
     role: str
-    sub_admin_scope: str = None
+    sub_admin_scope: Optional[str] = None
+
 
 VALID_ROLES = {r.value for r in models.UserRole}
 VALID_SCOPES = {"surface_water", "groundwater", "water_quality", "coastal_marine", "forecast", "forecast_weekly", "reports", "alerts", "vanguards"}
+
 
 @router.get("/users")
 def list_users(
@@ -274,5 +311,3 @@ def assign_role(
     db.commit()
     db.refresh(user)
     return schemas.UserOut.from_orm(user)
-
-
