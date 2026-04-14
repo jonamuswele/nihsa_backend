@@ -15,6 +15,11 @@ from pydantic import BaseModel
 from database import get_db
 import models, schemas
 from auth_utils import require_role
+import zipfile
+import tempfile
+import os
+import shapefile
+
 
 router = APIRouter()
 
@@ -69,6 +74,125 @@ if USE_R2 and R2_ACCOUNT_ID and R2_ACCESS_KEY and R2_SECRET_KEY:
         print(f"✅ R2 ready for map layers")
     except Exception as e:
         print(f"⚠️ R2 init failed: {e}")
+
+def shp_to_geojson(content_bytes: bytes) -> tuple:
+    """
+    Convert uploaded Shapefile (zip containing .shp, .shx, .dbf, .prj) to GeoJSON.
+    Returns: (geojson_string, feature_count, skipped_count)
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Save zip and extract
+        zip_path = os.path.join(tmpdir, 'upload.zip')
+        with open(zip_path, 'wb') as f:
+            f.write(content_bytes)
+        
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(tmpdir)
+        
+        # Find .shp file
+        shp_files = [f for f in os.listdir(tmpdir) if f.endswith('.shp')]
+        if not shp_files:
+            raise ValueError("No .shp file found in archive")
+        
+        shp_path = os.path.join(tmpdir, shp_files[0])
+        
+        # Read shapefile with encoding fix for Nigerian data
+        try:
+            sf = shapefile.Reader(shp_path, encoding='utf-8')
+        except:
+            sf = shapefile.Reader(shp_path, encoding='latin1')
+        
+        # Get field names
+        fields = [f[0] for f in sf.fields[1:]]
+        
+        features = []
+        skipped = 0
+        
+        for i, shape_record in enumerate(sf.iterShapeRecords()):
+            shape = shape_record.shape
+            record = shape_record.record
+            
+            # Build properties dictionary
+            props = {}
+            for j, field_name in enumerate(fields):
+                val = record[j]
+                if val is not None and val != '':
+                    # Convert bytes to string if needed
+                    if isinstance(val, bytes):
+                        val = val.decode('utf-8', errors='ignore')
+                    props[field_name] = val
+            
+            # Convert shape to GeoJSON geometry
+            geom = None
+            
+            if shape.shapeType == shapefile.POINT:
+                geom = {"type": "Point", "coordinates": [shape.points[0][0], shape.points[0][1]]}
+            
+            elif shape.shapeType == shapefile.POLYGON:
+                # Handle polygons with holes
+                parts = list(shape.parts) + [len(shape.points)]
+                rings = []
+                for j in range(len(shape.parts)):
+                    start = parts[j]
+                    end = parts[j+1]
+                    ring = [[p[0], p[1]] for p in shape.points[start:end]]
+                    rings.append(ring)
+                
+                if len(rings) == 1:
+                    geom = {"type": "Polygon", "coordinates": rings}
+                else:
+                    geom = {"type": "MultiPolygon", "coordinates": [[ring] for ring in rings]}
+            
+            elif shape.shapeType == shapefile.POLYLINE:
+                parts = list(shape.parts) + [len(shape.points)]
+                lines = []
+                for j in range(len(shape.parts)):
+                    start = parts[j]
+                    end = parts[j+1]
+                    line = [[p[0], p[1]] for p in shape.points[start:end]]
+                    lines.append(line)
+                
+                if len(lines) == 1:
+                    geom = {"type": "LineString", "coordinates": lines[0]}
+                else:
+                    geom = {"type": "MultiLineString", "coordinates": lines}
+            
+            elif shape.shapeType == shapefile.MULTIPOINT:
+                coords = [[p[0], p[1]] for p in shape.points]
+                geom = {"type": "MultiPoint", "coordinates": coords}
+            
+            if geom:
+                # Validate and clean coordinates (Nigeria bounds: lat 4-14, lng 2-15)
+                # Also swap if lat/lng are reversed
+                def clean_coords(coords):
+                    if isinstance(coords[0], (int, float)):
+                        lon, lat = coords[0], coords[1]
+                        # Check if coordinates are in Nigeria bounds
+                        if 2 <= lon <= 15 and 4 <= lat <= 14:
+                            return [lon, lat]
+                        elif 2 <= lat <= 15 and 4 <= lon <= 14:
+                            return [lat, lon]  # Swap
+                        else:
+                            return [lon, lat]  # Keep as is
+                    else:
+                        return [clean_coords(c) for c in coords]
+                
+                try:
+                    geom['coordinates'] = clean_coords(geom['coordinates'])
+                    
+                    features.append({
+                        "type": "Feature",
+                        "geometry": geom,
+                        "properties": props
+                    })
+                except:
+                    skipped += 1
+            else:
+                skipped += 1
+        
+        geojson = {"type": "FeatureCollection", "features": features}
+        return json.dumps(geojson), len(features), skipped
+
 
 
 def get_public_url(key: str) -> str:
@@ -261,9 +385,9 @@ class FileUploadRequest(BaseModel):
 
 @router.post("/{layer_id}/upload", status_code=201)
 async def upload_layer_data(
-        layer_id: str,
-        request: FileUploadRequest,
-        db: Session = Depends(get_db),
+    layer_id: str,
+    request: FileUploadRequest,
+    db: Session = Depends(get_db),
 ):
     print("=" * 60)
     print("🚨 UPLOAD FUNCTION WAS CALLED! 🚨")
@@ -272,7 +396,7 @@ async def upload_layer_data(
     
     # Get data from JSON request
     content = request.content.encode('utf-8')
-    filename = request.filename
+    filename = request.filename.lower()
 
     layer = db.query(models.MapLayer).filter(models.MapLayer.id == layer_id).first()
     if not layer:
@@ -281,14 +405,19 @@ async def upload_layer_data(
     if not USE_R2 or not r2_client:
         raise HTTPException(status_code=503, detail="R2 storage not configured")
 
-    if not filename.endswith('.csv'):
-        raise HTTPException(status_code=400, detail="Only CSV files are supported")
-
-    # Convert CSV to GeoJSON
-    geojson_str, feature_count, skipped = csv_to_geojson(content)
+    # Handle different file types
+    if filename.endswith('.csv'):
+        geojson_str, feature_count, skipped = csv_to_geojson(content)
+    elif filename.endswith('.zip'):
+        try:
+            geojson_str, feature_count, skipped = shp_to_geojson(content)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Shapefile processing error: {str(e)}")
+    else:
+        raise HTTPException(status_code=400, detail="Only CSV and ZIP (shapefile) files are supported")
 
     if feature_count == 0:
-        raise HTTPException(status_code=400, detail="No valid features found. Check lat/lon columns.")
+        raise HTTPException(status_code=400, detail="No valid features found.")
 
     # Upload to R2
     file_key = f"map-layers/{layer.layer_key}.geojson"
@@ -307,7 +436,8 @@ async def upload_layer_data(
         "feature_count": feature_count,
         "rows_skipped": skipped,
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
-        "filename": filename
+        "filename": request.filename,
+        "source_type": "shapefile" if filename.endswith('.zip') else "csv"
     }
     db.commit()
 
@@ -317,7 +447,7 @@ async def upload_layer_data(
         "rows_skipped": skipped,
         "size_kb": round(len(geojson_str) / 1024, 1),
         "public_url": public_url,
-        "message": f"Successfully uploaded {feature_count:,} features"
+        "message": f"Successfully converted shapefile to {feature_count:,} features"
     }
 
 @router.put("/{layer_id}", response_model=schemas.MapLayerOut)
