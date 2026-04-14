@@ -27,6 +27,7 @@ from sqlalchemy import text
 from routers.map_layers import DEFAULT_LAYERS
 import httpx
 from fastapi.responses import Response
+from fastapi.responses import HTMLResponse
 
 class ConnectionManager:
     def __init__(self):
@@ -225,6 +226,22 @@ app.include_router(map_layers.router,  prefix="/api/map-layers",   tags=["Map La
 @app.get("/api")
 async def api_root():
     return {"status": "ok", "message": "NIHSA API is running", "version": "1.0.0"}
+
+@app.get("/privacy-policy.html", response_class=HTMLResponse)
+async def privacy_policy():
+    """Serve the privacy policy page — required for Play Store."""
+    path = Path(__file__).parent / "privacy-policy.html"
+    if path.exists():
+        return HTMLResponse(content=path.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>Privacy Policy</h1><p>See nihsa.gov.ng</p>")
+
+@app.get("/terms-of-service.html", response_class=HTMLResponse)
+async def terms_of_service():
+    """Serve the terms of service page."""
+    path = Path(__file__).parent / "terms-of-service.html"
+    if path.exists():
+        return HTMLResponse(content=path.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>Terms of Service</h1><p>See nihsa.gov.ng</p>")
 
 @app.get("/api/proxy/csv")
 async def proxy_csv(url: str):
