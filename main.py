@@ -192,7 +192,11 @@ app.add_middleware(
 # Serve uploaded media files
 MEDIA_DIR = os.getenv("MEDIA_DIR", "/app/media")
 os.makedirs(MEDIA_DIR, exist_ok=True)
-app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
+if os.path.isdir(MEDIA_DIR):
+    try:
+        app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
+    except Exception as e:
+        print(f"Warning: Could not mount /media — {e}")
 
 # NFFS Atlas & Export static files
 NFFS_ROOT = Path(os.getenv("NFFS_ROOT", "/app/nffs_data"))
